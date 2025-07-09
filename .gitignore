@@ -1,0 +1,5 @@
+# Ignore all files in scansioni/
+scansioni/*
+
+# But keep the folder itself
+!scansioni/.gitkeep
