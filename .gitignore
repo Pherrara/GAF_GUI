@@ -1,5 +1,8 @@
 # Ignore all files in scansioni/
-scansioni/*
+calibration/*
+measurement/*
 
 # But keep the folder itself
-!scansioni/.gitkeep
+!measurement/.gitkeep
+!calibration/.gitkeep
+

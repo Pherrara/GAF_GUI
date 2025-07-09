@@ -20,7 +20,8 @@ st.sidebar.header("Parameters")
 
 
 
-folder_path = st.sidebar.text_input("Folder containing GAF images:", value="scansioni")
+folder_path = st.sidebar.text_input("Folder containing calibration GAF images:", value="calibration")
+measure_folder = st.sidebar.text_input("Folder containing measurement GAF images:", value="measurement")
 image_extension = st.sidebar.text_input("Image extension (e.g., .tif):", value=".tif")
 name_irradiated = st.sidebar.text_input("Prefix for irradiated films:", value="irr")
 name_velo = st.sidebar.text_input("Prefix for unirradiated films:", value="velo")
@@ -35,7 +36,7 @@ try:
     with open(dcc_file, "r") as f:
         dose_conversion_coefficient = float(f.read().strip())
 except Exception as e:
-    st.sidebar.error("Error reading dcc.dat, is the file present in the same folder?")
+    st.sidebar.error("Error reading dcc.dat, is the file present in the same folder? It is necessary for calibration.")
     dose_conversion_coefficient = 100.0  # fallback
 
 st.sidebar.markdown(f"**Dose Conversion Coefficient:** `{dose_conversion_coefficient:.3f} cGy`")
@@ -182,18 +183,25 @@ def format_sci_latex_signed(c):
 
 with st.expander("ℹ️ Show Info About This App"):
     st.markdown("""
-    This application performs GAF film calibration using automatic image segmentation and polynomial fitting.
+    **This application:**
+    - Performs GAF film calibration using automatic image segmentation and polynomial fitting.
+    - Allows to quickly make measurements when already possessing a calibration.
 
-    **Requirements**:
-    - Place the numbered images (e.g. `.tif`) in the selected folder (e.g. `scansioni`) and select the accurate prefixes (e.g. `irr`, `velo`)
+    **Calibration Requirements**:
+    - Place the numbered images (e.g. `.tif`) in the selected folder (e.g. `calibration`) and select the accurate prefixes (e.g. `irr`, `velo`)
     - `MU_values.dat` should be placed in the script folder and each line should contain the erogated MU for each film, in order.
     - The dose conversion coefficient can be placed in a file `dcc.dat`. This is how much cGy are actually received at the films geometry when using 100 MU.
-    
+
+    **Measurement Requirements**:
+    - Place the numbered images (e.g. `.tif`) in the selected folder (e.g. `measurement`) and select the accurate prefixes (e.g. `irr`, `velo`)
+    - Choose a calibration file or select a previously ran calibration from the list.
     
     **Workflow Summary**:
     - Automatically segment irradiated and unirradiated film scans
     - Compute mean value and standard deviation within the defined region
-    - Compute Optical Density and fit to dose using a polynomial
+    - Compute Optical Density and fit a calibration curve to dose using a polynomial
+    - Compare different calibrations
+    - Make measurement using previous calibrations
 
 
 
@@ -202,6 +210,10 @@ with st.expander("ℹ️ Show Info About This App"):
     """)
 
 # --- Main logic ---
+
+st.subheader("Make a New Calibration")
+
+
 if st.button("Run Calibration"):
     st.session_state.run_calibration = True
 if st.session_state.get("run_calibration", False):
@@ -367,6 +379,21 @@ if st.session_state.get("run_calibration", False):
             })
             st.success(f"Saved calibration as '{run_label}'")
 
+
+        if st.button("Write calibration.dat to script folder"):
+            try:
+                path = os.path.join(os.getcwd(), "calibration.dat")
+                with open(path, "w") as f:
+                    for c in coeffs[::-1]:  # write from lowest degree to highest
+                        f.write(f"{c:.8e}\n")
+                st.success(f"`calibration.dat` saved to: `{path}`")
+            except Exception as e:
+                st.error(f"Failed to write calibration.dat: {e}")
+
+
+
+        
+
         # --- Comparison of saved calibrations ---
         if len(st.session_state.calibration_runs) > 1:
             st.subheader("Compare Saved Calibration Runs")
@@ -420,9 +447,154 @@ if st.session_state.get("run_calibration", False):
         csv_bytes = comparison_df.to_csv(index=False).encode('utf-8')
         st.download_button("Download Comparison Table (CSV)", data=csv_bytes, file_name="dose_comparison.csv", mime="text/csv")
 
+        # Export calibration coefficients
+        calibration_txt = "\n".join([f"{c:.8e}" for c in coeffs[::-1]])  # lowest order first
+        st.download_button("Download Calibration Coefficients (calibration.dat)",
+                           data=calibration_txt,
+                           file_name="calibration.dat",
+                           mime="text/plain")
+
+
         # Save final .dat files
         st.download_button("Download Irradiated Data (.dat)", data=open(input_file, "rb").read(), file_name="readings_irradiated.dat")
         st.download_button("Download Unirradiated Data (.dat)", data=open(ref_file, "rb").read(), file_name="readings_velo.dat")
+
+        
+
+
+
+
+
+
+# --- Calibration selection for measurement ---
+st.subheader("Make a Measurement Using a Previous Calibration")
+
+# Check if 'calibration.dat' exists in script folder
+script_folder_calib_path = os.path.join(os.getcwd(), "calibration.dat")
+file_in_script_folder = os.path.isfile(script_folder_calib_path)
+
+calib_options = [
+    "Upload calibration.dat",
+    "Use saved calibration run",
+    "Use calibration.dat from script folder"
+]
+
+default_selection = 2 if file_in_script_folder else 0  # index for default choice
+
+calib_source = st.radio("Choose calibration source:", calib_options, index=default_selection)
+
+selected_calib = None
+uploaded_file = None
+poly_fit = None
+
+if calib_source == "Upload calibration.dat":
+    uploaded_file = st.file_uploader("Upload calibration.dat", type=["dat", "txt"])
+    if uploaded_file:
+        try:
+            coeffs = np.loadtxt(uploaded_file)
+            poly_fit = np.poly1d(coeffs[::-1])
+            st.success("Loaded uploaded calibration successfully.")
+        except Exception as e:
+            st.error(f"Failed to parse uploaded file: {e}")
+
+elif calib_source == "Use saved calibration run":
+    if not st.session_state.calibration_runs:
+        st.warning("No saved calibrations available.")
+    else:
+        calib_labels = [run["label"] for run in st.session_state.calibration_runs]
+        selected_label = st.selectbox("Select saved calibration:", calib_labels)
+        selected_calib = next(run for run in st.session_state.calibration_runs if run["label"] == selected_label)
+        poly_fit = selected_calib["fit"]
+
+elif calib_source == "Use calibration.dat from script folder":
+    if not file_in_script_folder:
+        st.error("`calibration.dat` not found in script folder.")
+    else:
+        try:
+            coeffs = np.loadtxt(script_folder_calib_path)
+            poly_fit = np.poly1d(coeffs[::-1])  # reverse to highest-degree first
+            st.success("Loaded calibration from script folder.")
+        except Exception as e:
+            st.error(f"Failed to read calibration.dat: {e}")
+
+
+
+
+# Now make a measurement
+
+if st.button("Make Measurement"):
+    st.session_state.make_measurement = True
+
+if st.session_state.get("make_measurement", False):
+    st.success("Running measurement pipeline...")
+
+    irr_list = get_image_sequence(measure_folder, image_extension, name_irradiated)
+    velo_list = get_image_sequence(measure_folder, image_extension, name_velo)
+
+    if len(irr_list) != len(velo_list):
+        st.error("Mismatch in number of irradiated and unirradiated films")
+    
+
+        
+    if poly_fit is None:
+        st.error("No valid calibration loaded. Cannot proceed with measurement.")
+        st.stop()
+
+
+    mean_irr, std_irr, mean_velo, std_velo = [], [], [], []
+
+    for f_irr, f_vel in zip(irr_list, velo_list):
+        path_irr = os.path.join(measure_folder, f_irr)
+        path_vel = os.path.join(measure_folder, f_vel)
+
+        img_irr, mask_irr = load_image_and_segment_white(path_irr, white_threshold_percent)
+        _, mean_i, std_i, _ = final_segmentation(img_irr, tolerance_percent, mask_irr)
+        mean_irr.append(mean_i)
+        std_irr.append(std_i)
+
+        img_vel, mask_vel = load_image_and_segment_white(path_vel, white_threshold_percent)
+        _, mean_v, std_v, _ = final_segmentation(img_vel, tolerance_percent, mask_vel)
+        mean_velo.append(mean_v)
+        std_velo.append(std_v)
+
+    reading = np.array(mean_irr)
+    reading_err = np.array(std_irr)
+    reference = np.array(mean_velo)
+    reference_err = np.array(std_velo)
+
+    OD, OD_err = compute_optical_density(reading, reading_err, reference, reference_err)
+    dose_estimates = poly_fit(OD)
+
+    df = pd.DataFrame({
+        "Film": irr_list,
+        "OD": OD,
+        "OD Error": OD_err,
+        "Estimated Dose [cGy]": dose_estimates
+    })
+    
+    df.index = np.arange(1, len(df) + 1)  # Set index to start from 1
+    
+    st.subheader("Measurement Results")
+    st.dataframe(df.style.format({
+        "OD": "{:.4f}",
+        "OD Error": "{:.4f}",
+        "Estimated Dose [cGy]": "{:.2f}"
+    }))
+
+
+    st.download_button("Download Measurement Results (CSV)",
+                       data=df.to_csv(index=False).encode(),
+                       file_name="measurement_results.csv",
+                       mime="text/csv")
+
+
+
+
+
+
+
+
+
 
 
 st.markdown(
