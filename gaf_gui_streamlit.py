@@ -8,6 +8,8 @@ import re
 import matplotlib.pyplot as plt
 from io import BytesIO
 
+
+
 if "calibration_runs" not in st.session_state:
     st.session_state.calibration_runs = []
 
@@ -20,13 +22,53 @@ st.sidebar.header("Parameters")
 
 
 
-folder_path = st.sidebar.text_input("Folder containing calibration GAF images:", value="calibration")
-measure_folder = st.sidebar.text_input("Folder containing measurement GAF images:", value="measurement")
-image_extension = st.sidebar.text_input("Image extension (e.g., .tif):", value=".tif")
+# --- Calibration Folder Selection (excluding hidden folders) ---
+script_folder = os.getcwd()
+all_folders = [
+    f for f in os.listdir(script_folder)
+    if os.path.isdir(os.path.join(script_folder, f)) and not f.startswith(".")
+]
+all_folders.sort()
+
+folder_path = st.sidebar.selectbox("Select calibration folder:", [""] + all_folders)
+
+#if folder_path == "":
+#    st.sidebar.warning("⚠️ Please select a folder to make a calibration.")
+
+
+#measure_folder = st.sidebar.text_input("Folder containing measurement GAF images:", value="measurement")
+# --- Measure Folder Selection (excluding hidden folders) ---
+# script_folder = os.getcwd()
+# all_folders = [
+#     f for f in os.listdir(script_folder)
+#     if os.path.isdir(os.path.join(script_folder, f)) and not f.startswith(".")
+# ]
+# all_folders.sort()
+
+measure_folder = st.sidebar.selectbox("Select measurement folder:", [""] + all_folders)
+
+#if measure_folder == "":
+#    st.sidebar.warning("⚠️ Please select a folder to make a measurement.")
+
+
+
 name_irradiated = st.sidebar.text_input("Prefix for irradiated films:", value="irr")
 name_velo = st.sidebar.text_input("Prefix for unirradiated films:", value="velo")
+image_extension = st.sidebar.text_input("Image extension (e.g., .tif):", value=".tif")
 
 x_values_file = st.sidebar.text_input("MU values file (MU):", value="MU_values.dat")
+# Check and display info about MU values file
+if os.path.isfile(x_values_file):
+    try:
+        with open(x_values_file, "r") as f:
+            lines = [line for line in f if line.strip()]
+            num_lines = len(lines)
+        st.sidebar.markdown(f"✅ `{x_values_file}`found  with **{num_lines} values**.")
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Failed to read `{x_values_file}`: {e}. It is necessary for calibration.")
+else:
+    st.sidebar.warning(f"❌ MU values file `{x_values_file}` not found. It is necessary for calibration.")
+
 
 dcc_file = st.sidebar.text_input("Dose conversion coefficient values file (cGy):", value="dcc.dat")
 
@@ -36,7 +78,7 @@ try:
     with open(dcc_file, "r") as f:
         dose_conversion_coefficient = float(f.read().strip())
 except Exception as e:
-    st.sidebar.error("Error reading dcc.dat, is the file present in the same folder? It is necessary for calibration.")
+    st.sidebar.error("Error reading dcc.dat, is the file present in the same folder? It is necessary for calibration. Defaulting to 100 cGy")
     dose_conversion_coefficient = 100.0  # fallback
 
 st.sidebar.markdown(f"**Dose Conversion Coefficient:** `{dose_conversion_coefficient:.3f} cGy`")
@@ -118,10 +160,13 @@ def display_overlay(image, mask, title):
     ax.axis("off")
     return fig
 
-def write_dat_file(mean_values, stdev_values, filename):
+def write_dat_file(mean_values, stdev_values):
+    from io import StringIO
     data = np.column_stack((mean_values, stdev_values))
+    buffer = StringIO()
     header = "Mean\tStdDev"
-    np.savetxt(filename, data, delimiter='\t', header=header, comments='', fmt='%.6f')
+    np.savetxt(buffer, data, delimiter='\t', header=header, comments='', fmt='%.6f')
+    return buffer.getvalue()
 
 def read_measurements(input_file):
     df = pd.read_csv(input_file, sep="\t", skipinitialspace=True)
@@ -180,6 +225,12 @@ def format_sci_latex_signed(c):
         base_str = f"{base:.3g}"
         return f"{sign} {base_str} \\times 10^{{{exponent}}}"
 
+def to_excel_bytes(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Calibration')
+    return output.getvalue()
+
 
 with st.expander("ℹ️ Show Info About This App"):
     st.markdown("""
@@ -215,7 +266,15 @@ st.subheader("Make a New Calibration")
 
 
 if st.button("Run Calibration"):
-    st.session_state.run_calibration = True
+    if folder_path == "":
+        st.error("❌ You must select a calibration folder before running calibration.")
+        st.session_state.run_calibration = False
+    elif not os.path.isdir(folder_path):
+        st.error(f"❌ The selected calibration folder '{folder_path}' does not exist.")
+        st.session_state.run_calibration = False
+    else:
+        st.session_state.run_calibration = True
+
 if st.session_state.get("run_calibration", False):
 
     st.success("Running calibration pipeline...")
@@ -253,11 +312,11 @@ if st.session_state.get("run_calibration", False):
         input_file = os.path.join(folder_path, 'readings_irradiated.dat')
         ref_file = os.path.join(folder_path, 'readings_velo.dat')
 
-        write_dat_file(np.array(mean_values_irr), np.array(stdev_values_irr), input_file)
-        write_dat_file(np.array(mean_values_velo), np.array(stdev_values_velo), ref_file)
+        #write_dat_file(np.array(mean_values_irr), np.array(stdev_values_irr), input_file)
+        #write_dat_file(np.array(mean_values_velo), np.array(stdev_values_velo), ref_file)
 
-        reading, reading_err = read_measurements(input_file)
-        reference, reference_err = read_measurements(ref_file)
+        reading, reading_err = np.array(mean_values_irr), np.array(stdev_values_irr)
+        reference, reference_err = np.array(mean_values_velo), np.array(stdev_values_velo)
         x_measured = read_x_values(x_values_file, dose_conversion_coefficient)
 
         OD, OD_err = compute_optical_density(reading, reading_err, reference, reference_err)
@@ -315,7 +374,7 @@ if st.session_state.get("run_calibration", False):
         # Labels and grid
         ax.set_xlabel('Optical Density (OD)')
         ax.set_ylabel('Dose [cGy]')
-        ax.set_title('Polynomial Fit: Dose vs OD')
+        ax.set_title(f'Polynomial Fit: Dose vs OD ({folder_path})')
         ax.grid(True)
         # Create the legend and store its reference
         legend = ax.legend(loc='upper left')
@@ -379,16 +438,24 @@ if st.session_state.get("run_calibration", False):
             })
             st.success(f"Saved calibration as '{run_label}'")
 
+        calib_filename = f"{os.path.basename(folder_path.strip(os.sep))}.dat"
 
-        if st.button("Write calibration.dat to script folder"):
+
+        if st.button(f"Save {calib_filename} to script folder"):
+            st.session_state.save_calib_clicked = True
+
+        if st.session_state.get("save_calib_clicked", False):
             try:
-                path = os.path.join(os.getcwd(), "calibration.dat")
+                calib_filename = f"{os.path.basename(folder_path.strip(os.sep))}.dat"
+                path = os.path.join(os.getcwd(), calib_filename)
                 with open(path, "w") as f:
-                    for c in coeffs[::-1]:  # write from lowest degree to highest
+                    for c in coeffs[::-1]:
                         f.write(f"{c:.8e}\n")
-                st.success(f"`calibration.dat` saved to: `{path}`")
+                st.success(f"`{calib_filename}` saved to: `{path}`")
             except Exception as e:
-                st.error(f"Failed to write calibration.dat: {e}")
+                st.error(f"Failed to write {calib_filename}: {e}")
+            finally:
+                st.session_state.save_calib_clicked = False  # Reset after handling
 
 
 
@@ -404,7 +471,8 @@ if st.session_state.get("run_calibration", False):
                 default=[run["label"] for run in st.session_state.calibration_runs]
             )
         
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig_compare, ax = plt.subplots(figsize=(10, 6), dpi = 300)
+
         
             color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
         
@@ -429,7 +497,12 @@ if st.session_state.get("run_calibration", False):
             ax.set_title("Comparison of Calibration Fits")
             ax.grid(True)
             ax.legend()
-            st.pyplot(fig)
+            st.pyplot(fig_compare)
+
+            buf_compare = BytesIO()
+            fig_compare.savefig(buf_compare, format="png")
+            st.download_button("Download Comparison Plot", data=buf_compare.getvalue(), file_name="comparison_plot.png", mime="image/png")
+
                                    
 
 
@@ -441,25 +514,45 @@ if st.session_state.get("run_calibration", False):
         # Save plot button
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        st.download_button("Download Plot as PNG", data=buf.getvalue(), file_name="dose_fit_plot.png", mime="image/png")
+        st.download_button("Download Plot as PNG", data=buf.getvalue(), file_name=f"dose_fit_plot_{calib_filename}.png", mime="image/png")
 
         # Optional: download as CSV
         csv_bytes = comparison_df.to_csv(index=False).encode('utf-8')
-        st.download_button("Download Comparison Table (CSV)", data=csv_bytes, file_name="dose_comparison.csv", mime="text/csv")
+        st.download_button("Download Comparison Table (CSV)", data=csv_bytes, file_name=f"dose_comparison_{calib_filename}.csv", mime="text/csv")
+
+        excel_data = to_excel_bytes(comparison_df)
+        st.download_button(
+            label="Download Comparison Table (Excel .xlsx)",
+            data=excel_data,
+            file_name=f"dose_comparison_{calib_filename}_.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
 
         # Export calibration coefficients
         calibration_txt = "\n".join([f"{c:.8e}" for c in coeffs[::-1]])  # lowest order first
-        st.download_button("Download Calibration Coefficients (calibration.dat)",
-                           data=calibration_txt,
-                           file_name="calibration.dat",
-                           mime="text/plain")
+        st.download_button(f"Download Calibration Coefficients",
+                   data=calibration_txt,
+                   file_name=calib_filename,
+                   mime="text/plain")
 
 
-        # Save final .dat files
-        st.download_button("Download Irradiated Data (.dat)", data=open(input_file, "rb").read(), file_name="readings_irradiated.dat")
-        st.download_button("Download Unirradiated Data (.dat)", data=open(ref_file, "rb").read(), file_name="readings_velo.dat")
 
-        
+        # Download from memory, do not save to disk
+        st.download_button(
+            "Download Irradiated Data (.dat)",
+            data=write_dat_file(mean_values_irr, stdev_values_irr),
+            file_name=f"readings_irradiated_{calib_filename}.dat",
+            mime="text/plain"
+        )
+
+        st.download_button(
+            "Download Unirradiated Data (.dat)",
+            data=write_dat_file(mean_values_velo, stdev_values_velo),
+            file_name=f"readings_velo_{calib_filename}.dat",
+            mime="text/plain"
+        )
+
 
 
 
@@ -469,9 +562,13 @@ if st.session_state.get("run_calibration", False):
 # --- Calibration selection for measurement ---
 st.subheader("Make a Measurement Using a Previous Calibration")
 
-# Check if 'calibration.dat' exists in script folder
-script_folder_calib_path = os.path.join(os.getcwd(), "calibration.dat")
-file_in_script_folder = os.path.isfile(script_folder_calib_path)
+# --- Check for available calibration files in the current folder ---
+script_folder = os.getcwd()
+calib_dat_files = [
+    f for f in os.listdir(script_folder)
+    if f.lower().endswith(".dat") and "calibration" in f.lower()
+]
+file_in_script_folder = len(calib_dat_files) > 0
 
 calib_options = [
     "Upload calibration.dat",
@@ -479,7 +576,7 @@ calib_options = [
     "Use calibration.dat from script folder"
 ]
 
-default_selection = 2 if file_in_script_folder else 0  # index for default choice
+default_selection = 2 if file_in_script_folder else 0  # prefer script folder if files found
 
 calib_source = st.radio("Choose calibration source:", calib_options, index=default_selection)
 
@@ -508,22 +605,31 @@ elif calib_source == "Use saved calibration run":
 
 elif calib_source == "Use calibration.dat from script folder":
     if not file_in_script_folder:
-        st.error("`calibration.dat` not found in script folder.")
+        st.error("No calibration `.dat` files found in the script folder.")
     else:
+        selected_file = st.selectbox("Select a calibration file:", calib_dat_files)
+        selected_path = os.path.join(script_folder, selected_file)
         try:
-            coeffs = np.loadtxt(script_folder_calib_path)
-            poly_fit = np.poly1d(coeffs[::-1])  # reverse to highest-degree first
-            st.success("Loaded calibration from script folder.")
+            coeffs = np.loadtxt(selected_path)
+            poly_fit = np.poly1d(coeffs[::-1])
+            st.success(f"Loaded calibration from `{selected_file}`.")
         except Exception as e:
-            st.error(f"Failed to read calibration.dat: {e}")
-
+            st.error(f"Failed to load `{selected_file}`: {e}")
 
 
 
 # Now make a measurement
 
 if st.button("Make Measurement"):
-    st.session_state.make_measurement = True
+    if measure_folder.strip() == "":
+        st.error("❌ You must select a measurement folder before running measurement.")
+        st.session_state.make_measurement = False
+    elif not os.path.isdir(measure_folder):
+        st.error(f"❌ The selected measurement folder '{measure_folder}' does not exist.")
+        st.session_state.make_measurement = False
+    else:
+        st.session_state.make_measurement = True
+
 
 if st.session_state.get("make_measurement", False):
     st.success("Running measurement pipeline...")
@@ -582,10 +688,21 @@ if st.session_state.get("make_measurement", False):
     }))
 
 
-    st.download_button("Download Measurement Results (CSV)",
-                       data=df.to_csv(index=False).encode(),
-                       file_name="measurement_results.csv",
-                       mime="text/csv")
+    meas_filename = f"{os.path.basename(measure_folder)}_results.csv"
+    st.download_button("Download Measurement Results (.csv)",
+                    data=df.to_csv(index=False).encode(),
+                    file_name=meas_filename,
+                    mime="text/csv")
+
+    excel_data_meas = to_excel_bytes(df)
+    st.download_button(
+        label="Download Measurement Results (Excel .xlsx)",
+        data=excel_data_meas,
+        file_name=meas_filename.replace(".csv", ".xlsx"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
 
 
 
@@ -600,7 +717,7 @@ if st.session_state.get("make_measurement", False):
 st.markdown(
     """
     <div style='text-align: right; font-size: 0.85em; color: gray; margin-top: 2em;'>
-        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com - &nbsp;|&nbsp; © 2025
+        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.1.0 Jul 2025
     </div>
     """,
     unsafe_allow_html=True
