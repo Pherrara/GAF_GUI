@@ -42,7 +42,7 @@ The algorithms used for segmentation and polynomial fitting routines are fully t
 
 ---
 
-### ✅ Make a Virtual Environment (recommended)
+## ✅ Make a Virtual Environment (recommended)
 
 - To isolate dependencies and avoid interfering with system-wide packages, it’s recommended to use a custom **Python virtual environment**.
 
@@ -70,11 +70,23 @@ source <your chosen environment name>/bin/activate
 
 ---
 
-### 📦 Dependencies
+## ⬇️ Downlaod the script
+
+- Realistically, you only need the main `gaf_gui_streamlit.py` script file, you can download it from the **release** section on the right.
+- If you want to have also some example files, like a `MU_values.dat` or `dcc.dat`, feel free to `git clone` this entire repository, so you can also update it automatically by using `git pull`.
+```
+git clone https://github.com/Pherrara/GAF_GUI.git
+cd GAF_GUI/
+git pull
+``` 
+
+---
+
+## 📦 Dependencies
 
 - Once in your chosen python environment, install required packages with:
 ``` shell
-pip install -r requirements.txt 
+pip install streamlit numpy pandas opencv-python matplotlib openpyxl
 ```
 
 - Or install the dependencies manually:
@@ -89,14 +101,13 @@ pip install -r requirements.txt
 
 ## ▶️ Usage
 
-1. **Launch the App**:
-
+1. **Launch the App**. From inside the script folder:
    ```bash
    streamlit run gaf_gui_streamlit.py
    ```
 
 2. **Prepare Folders:**
-   - Place numbered `.tif` film scans or similar formats into a folder for **calibration** and/or **measurement**.
+   - Place numbered `.tif` film scans or similar formats into a folder for **calibration** and/or **measurement**. Those folders need to be in the root folder of the python script.
    - Use filename prefixes like `irr01.tif`, `velo01.tif`, etc. to distinguish irradiated ('irr') and unirradiated ('velo').
    - The number of irradiated and unirradiated films file must be the same.
 
