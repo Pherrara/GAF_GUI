@@ -50,23 +50,23 @@ The algorithms used for segmentation and polynomial fitting routines are fully t
 2. Go into the folder you want to setup your environment.
 3. Then, run:
 
-```bash
-python -m venv <your chosen environment name>
-```
+  ```bash
+  python -m venv <your chosen environment name>
+  ```
 
 - This will create a folder named `<your chosen environment name>/` containing your isolated environment. This will keep your dependencies well isolated from your main python environment.
 
 - To access the environment (you have to make sure to **do this everytime** you try to run the GAF_GUI app or want to install dependencies) in **Linux/macOS**:
 
-```bash
-source <your chosen environment name>/bin/activate
-```
+  ```bash
+  source <your chosen environment name>/bin/activate
+  ```
 
 - NOTE: this last command is different on **Windows**:
 
-```powershell
-<your chosen environment name>\Scripts\activate.bat
-```
+  ```powershell
+  <your chosen environment name>\Scripts\activate.bat
+  ```
 
 ---
 
@@ -74,11 +74,11 @@ source <your chosen environment name>/bin/activate
 
 - Realistically, you only need the main `gaf_gui_streamlit.py` script file, you can download it from the **release** section on the right.
 - If you want to have also some example files, like a `MU_values.dat` or `dcc.dat`, feel free to `git clone` this entire repository, so you can also update it automatically by using `git pull`.
-```
-git clone https://github.com/Pherrara/GAF_GUI.git
-cd GAF_GUI/
-git pull
-``` 
+  ```
+  git clone https://github.com/Pherrara/GAF_GUI.git
+  cd GAF_GUI/
+  git pull
+  ``` 
 
 ---
 
@@ -102,9 +102,9 @@ pip install streamlit numpy pandas opencv-python matplotlib openpyxl
 ## ▶️ Usage
 
 1. **Launch the App**. From inside the script folder:
-   ```bash
-   streamlit run gaf_gui_streamlit.py
-   ```
+  ```bash
+  streamlit run gaf_gui_streamlit.py
+  ```
 
 2. **Prepare Folders:**
    - Place numbered `.tif` film scans or similar formats into a folder for **calibration** and/or **measurement**. Those folders need to be in the root folder of the python script.
