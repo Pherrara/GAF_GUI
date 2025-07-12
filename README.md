@@ -6,6 +6,8 @@
 
 ![GAF GUI Icon](logo.png)
 
+---
+
 ![GAF GUI Icon](screenshot.png)
 
 ---
