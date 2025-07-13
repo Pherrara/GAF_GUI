@@ -17,6 +17,7 @@
 This **Streamlit-based GUI** provides a pipeline for **GAFchromic film dosimetry calibration and measurement** using automatic segmentation, Optical Density estimation and polynomial curve fitting.
 This tool is intended for **clinical medical physicists**, **dosimetrists**, **technicians** and **researchers** involved in radiotherapy QA or film dosimetry. 
 The algorithms used for segmentation and polynomial fitting routines are fully transparent.
+The films must be first scanned and named as explained below in the Usage section.
 
 ---
 
@@ -116,6 +117,7 @@ pip install streamlit numpy pandas opencv-python matplotlib openpyxl
    - Place numbered `.tif` film scans or similar formats into a folder for **calibration** and/or **measurement**. Those folders need to be in the root folder of the python script.
    - Use filename prefixes like `irr01.tif`, `velo01.tif`, etc. to distinguish irradiated ('irr') and unirradiated ('velo').
    - The number of irradiated and unirradiated films file must be the same.
+   - Note that the films must be scanned in a way to be surrounded by white (like in most scanners) for the automatic segmentation to work correctly.
 
 3. **Required Input Files:**
    - `MU_values.dat`: One line per film with monitor units used during calibration.
