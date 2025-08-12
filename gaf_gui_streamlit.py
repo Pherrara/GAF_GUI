@@ -8,6 +8,9 @@ import re
 import matplotlib.pyplot as plt
 from io import BytesIO
 
+from pathlib import Path
+
+
 
 
 if "calibration_runs" not in st.session_state:
@@ -22,6 +25,15 @@ st.sidebar.header("Parameters")
 
 
 
+# --- Channel selection (OpenCV loads as BGR) ---
+channel_label = st.sidebar.radio(
+    "Read channel", ["Red", "Green", "Blue"], index=0,
+    help="The reading channel for GAF films depends on energy"
+)
+channel_code = {"Red": "R", "Green": "G", "Blue": "B"}[channel_label]
+
+
+
 # --- Calibration Folder Selection (excluding hidden folders) ---
 script_folder = os.getcwd()
 all_folders = [
@@ -32,23 +44,10 @@ all_folders.sort()
 
 folder_path = st.sidebar.selectbox("Select calibration folder:", [""] + all_folders)
 
-#if folder_path == "":
-#    st.sidebar.warning("⚠️ Please select a folder to make a calibration.")
 
-
-#measure_folder = st.sidebar.text_input("Folder containing measurement GAF images:", value="measurement")
-# --- Measure Folder Selection (excluding hidden folders) ---
-# script_folder = os.getcwd()
-# all_folders = [
-#     f for f in os.listdir(script_folder)
-#     if os.path.isdir(os.path.join(script_folder, f)) and not f.startswith(".")
-# ]
-# all_folders.sort()
 
 measure_folder = st.sidebar.selectbox("Select measurement folder:", [""] + all_folders)
 
-#if measure_folder == "":
-#    st.sidebar.warning("⚠️ Please select a folder to make a measurement.")
 
 
 
@@ -56,7 +55,23 @@ name_irradiated = st.sidebar.text_input("Prefix for irradiated films:", value="i
 name_velo = st.sidebar.text_input("Prefix for unirradiated films:", value="velo")
 image_extension = st.sidebar.text_input("Image extension (e.g., .tif):", value=".tif")
 
-x_values_file = st.sidebar.text_input("MU values file (MU):", value="MU_values.dat")
+# x_values_file = st.sidebar.text_input("MU values file (MU):", value="MU_values.dat")
+uploaded_mu_file = st.sidebar.file_uploader(
+    "MU values file (MU):",
+    type=["dat", "txt", "csv"],
+    help="A file with the MU irradiated for each film, one value per line, in order. Default is MU_values.dat in the app folder. Upload another if needed."
+)
+
+if uploaded_mu_file is not None:
+    app_dir = Path(__file__).resolve().parent
+    dest_path = app_dir / uploaded_mu_file.name
+    with open(dest_path, "wb") as f:
+        f.write(uploaded_mu_file.getbuffer())
+    x_values_file = str(dest_path)  # <-- string path to the saved file
+else:
+    x_values_file = str(Path(__file__).resolve().parent / "MU_values.dat")
+
+
 # Check and display info about MU values file
 if os.path.isfile(x_values_file):
     try:
@@ -70,20 +85,47 @@ else:
     st.sidebar.warning(f"❌ MU values file `{x_values_file}` not found. It is necessary for calibration.")
 
 
-dcc_file = st.sidebar.text_input("Dose conversion coefficient values file (cGy):", value="dcc.dat")
-
 
 # Read dose conversion coefficient from file
-try:
-    with open(dcc_file, "r") as f:
-        dose_conversion_coefficient = float(f.read().strip())
-except Exception as e:
-    st.sidebar.error("Error reading dcc.dat, is the file present in the same folder? It is necessary for calibration. Defaulting to 100 cGy")
-    dose_conversion_coefficient = 100.0  # fallback
+# File uploader for DCC
+uploaded_dcc_file = st.sidebar.file_uploader(
+    "Dose Conversion Coefficient file (dcc.dat):",
+    type=["dat", "txt", "csv"],
+    help="This is how much cGy are actually received at the films geometry when using 100 MU. Default is dcc.dat in the app folder. Upload another if needed."
+)
 
-st.sidebar.markdown(f"**Dose Conversion Coefficient:** `{dose_conversion_coefficient:.3f} cGy`")
+if uploaded_dcc_file is not None:
+    app_dir = Path(__file__).resolve().parent
+    dest_path = app_dir / uploaded_dcc_file.name
+    with open(dest_path, "wb") as f:
+        f.write(uploaded_dcc_file.getbuffer())
+    dcc_file = str(dest_path)  # string path to saved file
+else:
+    dcc_file = str(Path(__file__).resolve().parent / "dcc.dat")
+
+# Read and validate the Dose Conversion Coefficient
+if os.path.isfile(dcc_file):
+    try:
+        with open(dcc_file, "r") as f:
+            dose_conversion_coefficient = float(f.read().strip())
+        st.sidebar.markdown(
+            f"✅ `{dcc_file}` found — **Dose Conversion Coefficient:** `{dose_conversion_coefficient:.3f} cGy`"
+        )
+    except Exception as e:
+        st.sidebar.error(
+            f"⚠️ Failed to read `{dcc_file}`: {e}. "
+            "It is necessary for calibration. Defaulting to 100 cGy."
+        )
+        dose_conversion_coefficient = 100.0
+else:
+    st.sidebar.warning(
+        f"❌ DCC file `{dcc_file}` not found. "
+        "It is necessary for calibration. Defaulting to 100 cGy."
+    )
+    dose_conversion_coefficient = 100.0
 
 
+# Thresholding
 white_threshold_percent = st.sidebar.number_input(
     "White border segmentation threshold (%)",
     min_value=0.0, max_value=100.0, value=2.0, step=0.1, format="%.2f"
@@ -124,6 +166,17 @@ def get_image_sequence(folder_path, image_extension, name_type):
     image_files.sort(key=lambda x: x[1])
     return [f[0] for f in image_files]
 
+def _extract_channel(image: np.ndarray, channel: str) -> np.ndarray:
+    """
+    Return the selected channel from a BGR image.
+    If image is already single-channel, return as-is.
+    channel in {'R','G','B'}.
+    """
+    if image.ndim == 2:
+        return image
+    idx = {"B": 0, "G": 1, "R": 2}[channel]
+    return image[:, :, idx]
+
 def load_image_and_segment_white(path, white_treshold_percent):
     image = cv2.imread(path)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -136,7 +189,8 @@ def load_image_and_segment_white(path, white_treshold_percent):
     green_square = cv2.morphologyEx(green_square, cv2.MORPH_CLOSE, kernel)
     return image, green_square
 
-def final_segmentation(image, tolerance_percent, green_square):
+
+def final_segmentation(image, tolerance_percent, green_square, channel):
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     green_pixels = gray_image[green_square == 255]
     median_val = np.median(green_pixels)
@@ -145,10 +199,16 @@ def final_segmentation(image, tolerance_percent, green_square):
     upper_bound = median_val + tolerance
     within_range_mask = ((gray_image >= lower_bound) & (gray_image <= upper_bound)).astype(np.uint8) * 255
     final_mask = cv2.bitwise_and(within_range_mask, green_square)
-    selected_pixels = gray_image[final_mask == 255]
+
+    # Work on the same, user-selected channel
+    ch = _extract_channel(image, channel)
+    selected_pixels = ch[final_mask == 255]
     mean_val = np.mean(selected_pixels)
     std_dev_val = np.std(selected_pixels)
     return median_val, mean_val, std_dev_val, final_mask
+
+    return median_val, mean_val, std_dev_val, final_mask
+
 
 def display_overlay(image, mask, title):
     overlay_result = image.copy()
@@ -266,13 +326,19 @@ st.subheader("Make a New Calibration")
 
 
 if st.button("Run Calibration"):
-    if folder_path == "":
+    if folder_path == "": # check for calibration folder
         st.error("❌ You must select a calibration folder before running calibration.")
         st.session_state.run_calibration = False
     elif not os.path.isdir(folder_path):
         st.error(f"❌ The selected calibration folder '{folder_path}' does not exist.")
         st.session_state.run_calibration = False
-    else:
+    elif not os.path.isfile(x_values_file):
+        st.error(f"❌ MU values file not found: `{x_values_file}`. Please upload or place it in the app folder.")
+        st.session_state.run_calibration = False
+    elif not os.path.isfile(dcc_file):
+        st.error(f"⚠️ Dose Conversion Coefficient (DCC) file not found: `{dcc_file}`. Please upload or place it in the app folder. Defaulting to 100 cGy")
+        st.session_state.run_calibration = True
+    else: # or else start
         st.session_state.run_calibration = True
 
 if st.session_state.get("run_calibration", False):
@@ -292,7 +358,7 @@ if st.session_state.get("run_calibration", False):
             path_vel = os.path.join(folder_path, name_vel)
 
             img_irr, mask_irr = load_image_and_segment_white(path_irr, white_threshold_percent)
-            _, mean_irr, std_irr, final_mask_irr = final_segmentation(img_irr, tolerance_percent, mask_irr)
+            _, mean_irr, std_irr, final_mask_irr = final_segmentation(img_irr, tolerance_percent, mask_irr, channel_code)
             mean_values_irr.append(mean_irr)
             stdev_values_irr.append(std_irr)
 
@@ -302,7 +368,7 @@ if st.session_state.get("run_calibration", False):
             
 
             img_vel, mask_vel = load_image_and_segment_white(path_vel, white_threshold_percent)
-            _, mean_vel, std_vel, final_mask_vel = final_segmentation(img_vel, tolerance_percent, mask_vel)
+            _, mean_vel, std_vel, final_mask_vel = final_segmentation(img_vel, tolerance_percent, mask_vel, channel_code)
             mean_values_velo.append(mean_vel)
             stdev_values_velo.append(std_vel)
 
@@ -654,12 +720,12 @@ if st.session_state.get("make_measurement", False):
         path_vel = os.path.join(measure_folder, f_vel)
 
         img_irr, mask_irr = load_image_and_segment_white(path_irr, white_threshold_percent)
-        _, mean_i, std_i, _ = final_segmentation(img_irr, tolerance_percent, mask_irr)
+        _, mean_i, std_i, _ = final_segmentation(img_irr, tolerance_percent, mask_irr, channel_code)
         mean_irr.append(mean_i)
         std_irr.append(std_i)
 
         img_vel, mask_vel = load_image_and_segment_white(path_vel, white_threshold_percent)
-        _, mean_v, std_v, _ = final_segmentation(img_vel, tolerance_percent, mask_vel)
+        _, mean_v, std_v, _ = final_segmentation(img_vel, tolerance_percent, mask_vel, channel_code)
         mean_velo.append(mean_v)
         std_velo.append(std_v)
 
@@ -717,7 +783,7 @@ if st.session_state.get("make_measurement", False):
 st.markdown(
     """
     <div style='text-align: right; font-size: 0.85em; color: gray; margin-top: 2em;'>
-        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.1.0 Jul 2025
+        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.2.0 Aug 2025
     </div>
     """,
     unsafe_allow_html=True
