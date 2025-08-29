@@ -28,7 +28,7 @@ st.sidebar.header("Parameters")
 # --- Channel selection (OpenCV loads as BGR) ---
 channel_label = st.sidebar.radio(
     "Read channel", ["Red", "Green", "Blue"], index=0,
-    help="The reading channel for GAF films depends on energy"
+    help="The reading channel for GAF films depends on the total absorbed dose"
 )
 channel_code = {"Red": "R", "Green": "G", "Blue": "B"}[channel_label]
 
@@ -58,7 +58,7 @@ image_extension = st.sidebar.text_input("Image extension (e.g., .tif):", value="
 # x_values_file = st.sidebar.text_input("MU values file (MU):", value="MU_values.dat")
 uploaded_mu_file = st.sidebar.file_uploader(
     "MU values file (MU):",
-    type=["dat", "txt", "csv"],
+    type=["dat"],
     help="A file with the MU irradiated for each film, one value per line, in order. Default is MU_values.dat in the app folder. Upload another if needed."
 )
 
@@ -90,7 +90,7 @@ else:
 # File uploader for DCC
 uploaded_dcc_file = st.sidebar.file_uploader(
     "Dose Conversion Coefficient file (dcc.dat):",
-    type=["dat", "txt", "csv"],
+    type=["dat"],
     help="This is how much cGy are actually received at the films geometry when using 100 MU. Default is dcc.dat in the app folder. Upload another if needed."
 )
 
@@ -128,12 +128,26 @@ else:
 # Thresholding
 white_threshold_percent = st.sidebar.number_input(
     "White border segmentation threshold (%)",
-    min_value=0.0, max_value=100.0, value=2.0, step=0.1, format="%.2f"
+    min_value=0.0,
+    max_value=100.0,
+    value=2.0,
+    step=0.1,
+    format="%.2f",
+    help="Tolerance for detecting the external white film border. "
+         "Higher values make segmentation looser (accept more variation), "
+         "lower values make it stricter."
 )
 
 tolerance_percent = st.sidebar.number_input(
-    "Green square segmentation treshold (%)",
-    min_value=0.0, max_value=100.0, value=2.0, step=0.1, format="%.2f"
+    "Green square segmentation threshold (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=2.0,
+    step=0.1,
+    format="%.2f",
+    help="Tolerance for detecting the films reading area. "
+         "Higher values make segmentation looser (accept more variation), "
+         "lower values make it stricter."
 )
 
 poly_order = st.sidebar.slider("Polynomial fit order", 1, 10, 4)
@@ -344,8 +358,25 @@ if st.button("Run Calibration"):
 if st.session_state.get("run_calibration", False):
 
     st.success("Running calibration pipeline...")
+    
     irradiated_list = get_image_sequence(folder_path, image_extension, name_irradiated)
     velo_list = get_image_sequence(folder_path, image_extension, name_velo)
+    
+
+    if len(irradiated_list) == 0:
+        st.error(f"❌ No irradiated images found in `{folder_path}` "
+                f"with name `{name_irradiated}{image_extension}`.")
+        st.write("Irradiated files:", irradiated_list)
+        st.write("Unirradiated files:", velo_list)
+        st.stop()
+
+    if len(velo_list) == 0:
+        st.error(f"❌ No unirradiated (velo) images found in `{folder_path}` "
+                f"with name `{name_velo}{image_extension}`.")
+        st.write("Irradiated files:", irradiated_list)
+        st.write("Unirradiated files:", velo_list)
+        st.stop()
+
 
     if len(irradiated_list) != len(velo_list):
         st.error("Mismatch in number of irradiated and unirradiated films")
@@ -507,8 +538,9 @@ if st.session_state.get("run_calibration", False):
         calib_filename = f"{os.path.basename(folder_path.strip(os.sep))}.dat"
 
 
-        if st.button(f"Save {calib_filename} to script folder"):
+        if st.button(f"Save the calibration file {calib_filename} directly to script folder"):
             st.session_state.save_calib_clicked = True
+
 
         if st.session_state.get("save_calib_clicked", False):
             try:
@@ -542,27 +574,33 @@ if st.session_state.get("run_calibration", False):
         
             color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
         
+            handles, labels = [], []
+
             for i, run in enumerate(st.session_state.calibration_runs):
                 if run["label"] not in selected_labels:
                     continue
-        
+
                 color = color_cycle[i % len(color_cycle)]
-        
-                # Fit curve
+
                 OD_range = np.linspace(np.min(run["OD"]), np.max(run["OD"]), 500)
                 dose_fit = run["fit"](OD_range)
-                ax.plot(OD_range, dose_fit, label=f"{run['label']} (fit)", color=color)
-        
-                # Data points with error bars
-                ax.errorbar(run["OD"], run["x_measured"], xerr=run["OD_err"],
-                            fmt='o', markersize=4, capsize=3, linestyle='none',
-                            label=f"{run['label']} (data)", color=color)
-        
+                h_fit, = ax.plot(OD_range, dose_fit, label=f"{run['label']} (fit)", color=color)
+                handles.append(h_fit)
+                labels.append(f"{run['label']} (fit)")
+
+                h_data = ax.errorbar(run["OD"], run["x_measured"], xerr=run["OD_err"],
+                                    fmt='o', markersize=4, capsize=3, linestyle='none',
+                                    label=f"{run['label']} (data)", color=color)
+                handles.append(h_data)
+                labels.append(f"{run['label']} (data)")
+
             ax.set_xlabel("Optical Density (OD)")
             ax.set_ylabel("Dose [cGy]")
             ax.set_title("Comparison of Calibration Fits")
             ax.grid(True)
-            ax.legend()
+
+            if handles:  # only make legend if something was plotted
+                ax.legend(handles, labels)
             st.pyplot(fig_compare)
 
             buf_compare = BytesIO()
@@ -597,7 +635,7 @@ if st.session_state.get("run_calibration", False):
 
         # Export calibration coefficients
         calibration_txt = "\n".join([f"{c:.8e}" for c in coeffs[::-1]])  # lowest order first
-        st.download_button(f"Download Calibration Coefficients",
+        st.download_button(f"Download Calibration Coefficients (.dat)",
                    data=calibration_txt,
                    file_name=calib_filename,
                    mime="text/plain")
@@ -606,14 +644,14 @@ if st.session_state.get("run_calibration", False):
 
         # Download from memory, do not save to disk
         st.download_button(
-            "Download Irradiated Data (.dat)",
+            "Download Irradiated Films Raw Readings Data (.dat)",
             data=write_dat_file(mean_values_irr, stdev_values_irr),
             file_name=f"readings_irradiated_{calib_filename}.dat",
             mime="text/plain"
         )
 
         st.download_button(
-            "Download Unirradiated Data (.dat)",
+            "Download Unirradiated Films Raw Readings Data (.dat)",
             data=write_dat_file(mean_values_velo, stdev_values_velo),
             file_name=f"readings_velo_{calib_filename}.dat",
             mime="text/plain"
@@ -669,18 +707,35 @@ elif calib_source == "Use saved calibration run":
         selected_calib = next(run for run in st.session_state.calibration_runs if run["label"] == selected_label)
         poly_fit = selected_calib["fit"]
 
+
 elif calib_source == "Use calibration.dat from script folder":
-    if not file_in_script_folder:
-        st.error("No calibration `.dat` files found in the script folder.")
+    # List all .dat files in the script folder
+    dat_files = [f for f in os.listdir(script_folder) if f.lower().endswith(".dat")]
+    
+    if not dat_files:
+        st.error("No `.dat` files found in the script folder.")
+        poly_fit = None
     else:
-        selected_file = st.selectbox("Select a calibration file:", calib_dat_files)
-        selected_path = os.path.join(script_folder, selected_file)
-        try:
-            coeffs = np.loadtxt(selected_path)
-            poly_fit = np.poly1d(coeffs[::-1])
-            st.success(f"Loaded calibration from `{selected_file}`.")
-        except Exception as e:
-            st.error(f"Failed to load `{selected_file}`: {e}")
+        # Add a "None" option as default
+        dat_options = ["None"] + dat_files
+        selected_file = st.selectbox("Select a calibration file from script folder:", dat_options, index=0)
+
+        if selected_file != "None":
+            selected_path = os.path.join(script_folder, selected_file)
+            try:
+                coeffs = np.loadtxt(selected_path)
+                poly_fit = np.poly1d(coeffs[::-1])
+                st.success(f"Loaded calibration from `{selected_file}`.")
+            except Exception as e:
+                st.error(f"Failed to load `{selected_file}`: {e}")
+                poly_fit = None
+        else:
+            poly_fit = None  # User chose "None"
+
+
+
+
+
 
 
 
@@ -700,10 +755,24 @@ if st.button("Make Measurement"):
 if st.session_state.get("make_measurement", False):
     st.success("Running measurement pipeline...")
 
-    irr_list = get_image_sequence(measure_folder, image_extension, name_irradiated)
+    irradiated_list = get_image_sequence(measure_folder, image_extension, name_irradiated)
     velo_list = get_image_sequence(measure_folder, image_extension, name_velo)
 
-    if len(irr_list) != len(velo_list):
+    if len(irradiated_list) == 0:
+        st.error(f"❌ No irradiated images found in `{measure_folder}` "
+                f"with name `{name_irradiated}{image_extension}`.")
+        st.write("Irradiated files:", irradiated_list)
+        st.write("Unirradiated files:", velo_list)
+        st.stop()
+
+    if len(velo_list) == 0:
+        st.error(f"❌ No unirradiated (velo) images found in `{measure_folder}` "
+                f"with name `{name_velo}{image_extension}`.")
+        st.write("Irradiated files:", irradiated_list)
+        st.write("Unirradiated files:", velo_list)
+        st.stop()
+
+    if len(irradiated_list) != len(velo_list):
         st.error("Mismatch in number of irradiated and unirradiated films")
     
 
@@ -712,10 +781,12 @@ if st.session_state.get("make_measurement", False):
         st.error("No valid calibration loaded. Cannot proceed with measurement.")
         st.stop()
 
+    
+
 
     mean_irr, std_irr, mean_velo, std_velo = [], [], [], []
 
-    for f_irr, f_vel in zip(irr_list, velo_list):
+    for f_irr, f_vel in zip(irradiated_list, velo_list):
         path_irr = os.path.join(measure_folder, f_irr)
         path_vel = os.path.join(measure_folder, f_vel)
 
@@ -737,20 +808,26 @@ if st.session_state.get("make_measurement", False):
     OD, OD_err = compute_optical_density(reading, reading_err, reference, reference_err)
     dose_estimates = poly_fit(OD)
 
+    # Compute derivative of polynomial for error propagation
+    poly_derivative = np.polyder(poly_fit)   # derivative polynomial
+    dose_errors = np.abs(poly_derivative(OD)) * OD_err
+
     df = pd.DataFrame({
-        "Film": irr_list,
+        "Film": irradiated_list,
         "OD": OD,
         "OD Error": OD_err,
-        "Estimated Dose [cGy]": dose_estimates
+        "Estimated Dose [cGy]": dose_estimates,
+        "Estimated Dose Error [cGy]": dose_errors
     })
-    
+
     df.index = np.arange(1, len(df) + 1)  # Set index to start from 1
     
     st.subheader("Measurement Results")
     st.dataframe(df.style.format({
         "OD": "{:.4f}",
         "OD Error": "{:.4f}",
-        "Estimated Dose [cGy]": "{:.2f}"
+        "Estimated Dose [cGy]": "{:.2f}",
+        "Estimated Dose Error [cGy]": "{:.2f}"
     }))
 
 
@@ -783,7 +860,7 @@ if st.session_state.get("make_measurement", False):
 st.markdown(
     """
     <div style='text-align: right; font-size: 0.85em; color: gray; margin-top: 2em;'>
-        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.2.0 Aug 2025
+        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.2.1 Aug 2025
     </div>
     """,
     unsafe_allow_html=True
