@@ -760,7 +760,7 @@ if mode == "Measurement":
 st.markdown(
     """
     <div style='text-align: right; font-size: 0.85em; color: gray; margin-top: 2em;'>
-        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.3.0 Jun 2025
+        Developed by A. M. Ferrara - alessandromichele.ferrara@gmail.com &nbsp;|&nbsp; v1.3.0 Jun 2026
     </div>
     """,
     unsafe_allow_html=True
