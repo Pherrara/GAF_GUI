@@ -1,6 +1,6 @@
 # GAF Film Calibration GUI
 
-**Current Version**: 1.1.0 July 2025
+**Current Version**: 1.3.0 June 2026
 
 ---
 
